@@ -5,7 +5,25 @@ import tkinter as tk
 from tkinter import messagebox, ttk
 
 import requests
+from matplotlib.backends.backend_tkagg import FigureCanvasTkAgg
+from matplotlib.figure import Figure
 from PIL import Image, ImageTk
+
+KOLOR_SLUPKA = "#2a78d6"
+KOLOR_SIATKI = "#e1e0d9"
+KOLOR_OSI = "#c3c2b7"
+KOLOR_OPISOW = "#898781"
+KOLOR_TEKSTU = "#0b0b0b"
+KOLOR_TLA_WYKRESU = "#fcfcfb"
+
+NAZWY_STATYSTYK = {
+    "hp": "HP",
+    "attack": "Atak",
+    "defense": "Obrona",
+    "special-attack": "Sp. Atak",
+    "special-defense": "Sp. Obrona",
+    "speed": "Szybkość",
+}
 
 API_URL = "https://pokeapi.co/api/v2"
 
@@ -47,8 +65,8 @@ class PokedexApp(tk.Tk):
     def __init__(self):
         super().__init__()
         self.title("Pokédex")
-        self.geometry("920x650")
-        self.minsize(800, 550)
+        self.geometry("950x760")
+        self.minsize(850, 650)
 
         self.obrazek_tk = None
         self._numer_zapytania = 0
@@ -108,8 +126,13 @@ class PokedexApp(tk.Tk):
         self.etykieta_staty = ttk.Label(prawy, justify="left", font=("Consolas", 10))
         self.etykieta_staty.pack(anchor="w", pady=(5, 10))
 
-        ttk.Label(prawy, text="Opis:", font=("Segoe UI", 10, "bold")).pack(anchor="w")
-        self.etykieta_opis = ttk.Label(prawy, justify="left", wraplength=420)
+        self.figura_staty = Figure(figsize=(4.4, 2.4), dpi=90)
+        self.figura_staty.patch.set_facecolor(KOLOR_TLA_WYKRESU)
+        self.wykres_staty = FigureCanvasTkAgg(self.figura_staty, master=prawy)
+        self.wykres_staty.get_tk_widget().pack(anchor="w", pady=(0, 10))
+
+        ttk.Label(prawy, text="Opis:", font=("Segoe UI", 11, "bold")).pack(anchor="w")
+        self.etykieta_opis = ttk.Label(prawy, justify="left", wraplength=480, font=("Segoe UI", 12))
         self.etykieta_opis.pack(anchor="w")
 
     def _wczytaj_liste_w_tle(self):
@@ -212,14 +235,50 @@ class PokedexApp(tk.Tk):
         linie_staty = [
             f"Wzrost: {dane['height'] / 10} m    Waga: {dane['weight'] / 10} kg",
             f"Typy: {typy}",
-            "",
         ]
-        for stat in dane["stats"]:
-            linie_staty.append(f"{stat['stat']['name']:<16}: {stat['base_stat']}")
         self.etykieta_staty.configure(text="\n".join(linie_staty))
+
+        self._rysuj_wykres_staty(dane["stats"])
 
         self.etykieta_opis.configure(text=textwrap.fill(opis, width=60))
         self.status.set("Gotowe.")
+
+    def _rysuj_wykres_staty(self, staty: list):
+        self.figura_staty.clear()
+        ax = self.figura_staty.add_subplot(111)
+        ax.set_facecolor(KOLOR_TLA_WYKRESU)
+
+        etykiety = [NAZWY_STATYSTYK.get(s["stat"]["name"], s["stat"]["name"]) for s in staty]
+        wartosci = [s["base_stat"] for s in staty]
+
+        # odwracamy kolejność, zeby HP wyladowalo na gorze wykresu
+        etykiety = etykiety[::-1]
+        wartosci = wartosci[::-1]
+
+        slupki = ax.barh(etykiety, wartosci, height=0.6, color=KOLOR_SLUPKA)
+
+        for slupek, wartosc in zip(slupki, wartosci):
+            ax.text(
+                slupek.get_width() + max(wartosci) * 0.02,
+                slupek.get_y() + slupek.get_height() / 2,
+                str(wartosc),
+                va="center",
+                ha="left",
+                fontsize=9,
+                color=KOLOR_TEKSTU,
+            )
+
+        ax.set_xlim(0, max(wartosci) * 1.15)
+        ax.tick_params(axis="y", colors=KOLOR_TEKSTU, labelsize=9, length=0)
+        ax.tick_params(axis="x", colors=KOLOR_OPISOW, labelsize=8)
+        ax.grid(axis="x", color=KOLOR_SIATKI, linewidth=0.8)
+        ax.set_axisbelow(True)
+        for spina in ("top", "right", "left"):
+            ax.spines[spina].set_visible(False)
+        ax.spines["bottom"].set_color(KOLOR_OSI)
+
+        self.figura_staty.tight_layout()
+        self.wykres_staty.draw()
 
 
 if __name__ == "__main__":
