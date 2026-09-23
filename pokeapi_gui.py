@@ -35,6 +35,8 @@ KOLORY_STATYSTYK = {
 
 API_URL = "https://pokeapi.co/api/v2"
 
+_cache_umiejetnosci = {}
+
 
 def pobierz_json(url: str):
     response = requests.get(url)
@@ -51,12 +53,55 @@ def pobierz_liste_pokemonow():
     return wynik
 
 
-def pobierz_opis(url_gatunku: str) -> str:
-    dane = pobierz_json(url_gatunku)
-    for wpis in dane["flavor_text_entries"]:
+def wyciagnij_opis(gatunek: dict) -> str:
+    for wpis in gatunek["flavor_text_entries"]:
         if wpis["language"]["name"] == "en":
             return wpis["flavor_text"].replace("\x0c", " ").replace("\n", " ")
     return "Brak opisu."
+
+
+def wyciagnij_kategorie(gatunek: dict) -> str:
+    for wpis in gatunek["genera"]:
+        if wpis["language"]["name"] == "en":
+            return wpis["genus"]
+    return "-"
+
+
+def opis_plci(gender_rate: int) -> str:
+    if gender_rate == -1:
+        return "Bezpłciowy"
+    procent_samica = gender_rate / 8 * 100
+    procent_samiec = 100 - procent_samica
+    return f"{procent_samiec:.0f}% samiec / {procent_samica:.0f}% samica"
+
+
+def wyciagnij_przedmioty(dane: dict) -> str:
+    nazwy = sorted({h["item"]["name"].replace("-", " ").title() for h in dane["held_items"]})
+    return ", ".join(nazwy) if nazwy else "Brak"
+
+
+def pobierz_efekt_umiejetnosci(url: str) -> str:
+    if url in _cache_umiejetnosci:
+        return _cache_umiejetnosci[url]
+    dane = pobierz_json(url)
+    efekt = "Brak opisu."
+    for wpis in dane["effect_entries"]:
+        if wpis["language"]["name"] == "en":
+            efekt = wpis["short_effect"]
+            break
+    _cache_umiejetnosci[url] = efekt
+    return efekt
+
+
+def pobierz_umiejetnosci_z_efektami(dane: dict) -> list:
+    wynik = []
+    for a in dane["abilities"]:
+        nazwa = a["ability"]["name"].replace("-", " ").title()
+        if a["is_hidden"]:
+            nazwa += " (ukryta)"
+        efekt = pobierz_efekt_umiejetnosci(a["ability"]["url"])
+        wynik.append(f"{nazwa} — {efekt}")
+    return wynik
 
 
 def pobierz_obrazek(dane: dict) -> Image.Image:
@@ -73,8 +118,8 @@ class PokedexApp(tk.Tk):
     def __init__(self):
         super().__init__()
         self.title("Pokédex")
-        self.geometry("950x760")
-        self.minsize(850, 650)
+        self.geometry("1150x800")
+        self.minsize(1000, 700)
 
         self.obrazek_tk = None
         self._numer_zapytania = 0
@@ -122,8 +167,37 @@ class PokedexApp(tk.Tk):
         self.status = tk.StringVar(value="Wczytywanie listy Pokémonów...")
         ttk.Label(lewy, textvariable=self.status, wraplength=200).pack(anchor="w", pady=(5, 0))
 
-        prawy = ttk.Frame(self, padding=10)
-        prawy.pack(side="left", fill="both", expand=True)
+        prawy_kontener = ttk.Frame(self)
+        prawy_kontener.pack(side="left", fill="both", expand=True)
+
+        canvas_prawy = tk.Canvas(prawy_kontener, highlightthickness=0)
+        scroll_prawy = ttk.Scrollbar(prawy_kontener, orient="vertical", command=canvas_prawy.yview)
+        canvas_prawy.configure(yscrollcommand=scroll_prawy.set)
+        scroll_prawy.pack(side="right", fill="y")
+        canvas_prawy.pack(side="left", fill="both", expand=True)
+
+        prawy = ttk.Frame(canvas_prawy, padding=10)
+        okno_prawy = canvas_prawy.create_window((0, 0), window=prawy, anchor="nw")
+
+        def _na_zmiane_ramki(event):
+            canvas_prawy.configure(scrollregion=canvas_prawy.bbox("all"))
+
+        def _na_zmiane_canvas(event):
+            canvas_prawy.itemconfig(okno_prawy, width=event.width)
+
+        def _scroll_kolko(event):
+            canvas_prawy.yview_scroll(int(-1 * (event.delta / 120)), "units")
+
+        def _bind_kolko(event):
+            canvas_prawy.bind_all("<MouseWheel>", _scroll_kolko)
+
+        def _unbind_kolko(event):
+            canvas_prawy.unbind_all("<MouseWheel>")
+
+        prawy.bind("<Configure>", _na_zmiane_ramki)
+        canvas_prawy.bind("<Configure>", _na_zmiane_canvas)
+        canvas_prawy.bind("<Enter>", _bind_kolko)
+        canvas_prawy.bind("<Leave>", _unbind_kolko)
 
         self.etykieta_obrazka = ttk.Label(prawy)
         self.etykieta_obrazka.pack(pady=(0, 10))
@@ -131,17 +205,36 @@ class PokedexApp(tk.Tk):
         self.etykieta_naglowek = ttk.Label(prawy, font=("Segoe UI", 14, "bold"))
         self.etykieta_naglowek.pack(anchor="w")
 
+        ttk.Label(prawy, text="Opis:", font=("Segoe UI", 11, "bold")).pack(anchor="w", pady=(5, 0))
+        self.etykieta_opis = ttk.Label(prawy, justify="left", wraplength=650, font=("Segoe UI", 12))
+        self.etykieta_opis.pack(anchor="w", pady=(0, 10))
+
         self.etykieta_staty = ttk.Label(prawy, justify="left", font=("Consolas", 10))
-        self.etykieta_staty.pack(anchor="w", pady=(5, 10))
+        self.etykieta_staty.pack(anchor="w", pady=(0, 10))
+
+        ramka_wykres_szczegoly = ttk.Frame(prawy)
+        ramka_wykres_szczegoly.pack(anchor="w", fill="x", pady=(0, 10))
+
+        kolumna_wykres = ttk.Frame(ramka_wykres_szczegoly)
+        kolumna_wykres.pack(side="left", padx=(0, 25))
 
         self.figura_staty = Figure(figsize=(4.4, 2.4), dpi=90)
         self.figura_staty.patch.set_facecolor(KOLOR_TLA_WYKRESU)
-        self.wykres_staty = FigureCanvasTkAgg(self.figura_staty, master=prawy)
-        self.wykres_staty.get_tk_widget().pack(anchor="w", pady=(0, 10))
+        self.wykres_staty = FigureCanvasTkAgg(self.figura_staty, master=kolumna_wykres)
+        self.wykres_staty.get_tk_widget().pack()
 
-        ttk.Label(prawy, text="Opis:", font=("Segoe UI", 11, "bold")).pack(anchor="w")
-        self.etykieta_opis = ttk.Label(prawy, justify="left", wraplength=480, font=("Segoe UI", 12))
-        self.etykieta_opis.pack(anchor="w")
+        kolumna_szczegoly = ttk.Frame(ramka_wykres_szczegoly)
+        kolumna_szczegoly.pack(side="left", anchor="n", fill="both", expand=True)
+
+        ttk.Label(kolumna_szczegoly, text="Informacje o gatunku:", font=("Segoe UI", 11, "bold")).pack(
+            anchor="w"
+        )
+        self.etykieta_szczegoly = ttk.Label(kolumna_szczegoly, justify="left", font=("Consolas", 9))
+        self.etykieta_szczegoly.pack(anchor="w")
+
+        ttk.Label(prawy, text="Umiejętności:", font=("Segoe UI", 11, "bold")).pack(anchor="w")
+        self.etykieta_umiejetnosci = ttk.Label(prawy, justify="left", wraplength=650)
+        self.etykieta_umiejetnosci.pack(anchor="w", pady=(0, 10))
 
     def _wczytaj_liste_w_tle(self):
         watek = threading.Thread(target=self._pobierz_liste_watek, daemon=True)
@@ -204,7 +297,8 @@ class PokedexApp(tk.Tk):
     def _pobierz_pokemona_watek(self, nazwa_lub_numer: str, moj_numer: int):
         try:
             dane = pobierz_json(f"{API_URL}/pokemon/{nazwa_lub_numer}")
-            opis = pobierz_opis(dane["species"]["url"])
+            gatunek = pobierz_json(dane["species"]["url"])
+            umiejetnosci = pobierz_umiejetnosci_z_efektami(dane)
             obrazek = pobierz_obrazek(dane)
         except requests.exceptions.HTTPError:
             self.after(0, self._blad_szukania, moj_numer, nazwa_lub_numer, None)
@@ -213,7 +307,7 @@ class PokedexApp(tk.Tk):
             self.after(0, self._blad_szukania, moj_numer, nazwa_lub_numer, e)
             return
 
-        self.after(0, self._aktualizuj_pokemona, moj_numer, dane, opis, obrazek)
+        self.after(0, self._aktualizuj_pokemona, moj_numer, dane, gatunek, umiejetnosci, obrazek)
 
     def _blad_szukania(self, moj_numer: int, nazwa_lub_numer: str, blad):
         if moj_numer != self._numer_zapytania:
@@ -224,7 +318,9 @@ class PokedexApp(tk.Tk):
         else:
             messagebox.showerror("Błąd połączenia", str(blad))
 
-    def _aktualizuj_pokemona(self, moj_numer: int, dane: dict, opis: str, obrazek):
+    def _aktualizuj_pokemona(
+        self, moj_numer: int, dane: dict, gatunek: dict, umiejetnosci: list, obrazek
+    ):
         if moj_numer != self._numer_zapytania:
             return  # przyszła odpowiedź na nieaktualne zapytanie - ignorujemy
 
@@ -242,12 +338,35 @@ class PokedexApp(tk.Tk):
         typy = ", ".join(t["type"]["name"] for t in dane["types"])
         linie_staty = [
             f"Wzrost: {dane['height'] / 10} m    Waga: {dane['weight'] / 10} kg",
-            f"Typy: {typy}",
+            f"Typy: {typy}    Doświadczenie bazowe: {dane['base_experience']}",
         ]
         self.etykieta_staty.configure(text="\n".join(linie_staty))
 
         self._rysuj_wykres_staty(dane["stats"])
 
+        self.etykieta_umiejetnosci.configure(text="\n".join(umiejetnosci))
+
+        habitat = gatunek["habitat"]["name"] if gatunek["habitat"] else "-"
+        egg_groups = ", ".join(g["name"] for g in gatunek["egg_groups"])
+        linie_szczegoly = [
+            f"Kategoria:       {wyciagnij_kategorie(gatunek)}",
+            f"Kolor:           {gatunek['color']['name']}",
+            f"Kształt:         {gatunek['shape']['name'] if gatunek['shape'] else '-'}",
+            f"Środowisko:      {habitat}",
+            f"Legendarny:      {'Tak' if gatunek['is_legendary'] else 'Nie'}",
+            f"Mityczny:        {'Tak' if gatunek['is_mythical'] else 'Nie'}",
+            f"Baby:            {'Tak' if gatunek['is_baby'] else 'Nie'}",
+            f"Grupy jaj:       {egg_groups}",
+            f"Płeć:            {opis_plci(gatunek['gender_rate'])}",
+            f"Licznik wylęgu:  {gatunek['hatch_counter']}",
+            f"Wskaźnik złapania: {gatunek['capture_rate']}/255",
+            f"Bazowe szczęście: {gatunek['base_happiness']}",
+            f"Tempo wzrostu:   {gatunek['growth_rate']['name']}",
+            f"Przedmioty:      {wyciagnij_przedmioty(dane)}",
+        ]
+        self.etykieta_szczegoly.configure(text="\n".join(linie_szczegoly))
+
+        opis = wyciagnij_opis(gatunek)
         self.etykieta_opis.configure(text=textwrap.fill(opis, width=60))
         self.status.set("Gotowe.")
 
