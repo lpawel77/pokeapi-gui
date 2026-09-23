@@ -9,7 +9,6 @@ from matplotlib.backends.backend_tkagg import FigureCanvasTkAgg
 from matplotlib.figure import Figure
 from PIL import Image, ImageTk
 
-KOLOR_SLUPKA = "#2a78d6"
 KOLOR_SIATKI = "#e1e0d9"
 KOLOR_OSI = "#c3c2b7"
 KOLOR_OPISOW = "#898781"
@@ -23,6 +22,15 @@ NAZWY_STATYSTYK = {
     "special-attack": "Sp. Atak",
     "special-defense": "Sp. Obrona",
     "speed": "Szybkość",
+}
+
+KOLORY_STATYSTYK = {
+    "hp": "#008300",              # zielony
+    "attack": "#e34948",          # czerwony
+    "special-attack": "#e34948",  # czerwony
+    "defense": "#2a78d6",         # niebieski
+    "special-defense": "#2a78d6",  # niebieski
+    "speed": "#eda100",           # żółty
 }
 
 API_URL = "https://pokeapi.co/api/v2"
@@ -250,12 +258,14 @@ class PokedexApp(tk.Tk):
 
         etykiety = [NAZWY_STATYSTYK.get(s["stat"]["name"], s["stat"]["name"]) for s in staty]
         wartosci = [s["base_stat"] for s in staty]
+        kolory = [KOLORY_STATYSTYK.get(s["stat"]["name"], "#2a78d6") for s in staty]
 
         # odwracamy kolejność, zeby HP wyladowalo na gorze wykresu
         etykiety = etykiety[::-1]
         wartosci = wartosci[::-1]
+        kolory = kolory[::-1]
 
-        slupki = ax.barh(etykiety, wartosci, height=0.6, color=KOLOR_SLUPKA)
+        slupki = ax.barh(etykiety, wartosci, height=0.6, color=kolory)
 
         for slupek, wartosc in zip(slupki, wartosci):
             ax.text(
